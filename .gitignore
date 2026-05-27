@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Environment variables (never commit API keys)
+.env
+
+# Session logs (user data)
+sessions/
+
+# Logs
+*.log
