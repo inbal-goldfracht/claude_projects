@@ -4,7 +4,8 @@ A collection of coding projects built with Claude.
 
 ## Projects
 
-_No projects yet. Check back soon!_
+### [TPM Interview Coach](./tpm-coach)
+An AI-powered coaching app for Senior TPM and PM interview preparation. Runs locally and uses the Claude API to deliver personalised coaching sessions — live exercises, behavioural interview practice, scoring, and session summaries.
 
 ## Getting Started
 
