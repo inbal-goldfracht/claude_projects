@@ -12,6 +12,8 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SESSIONS_DIR = path.join(__dirname, 'sessions');
 if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 
+const CV_FILE = path.join(__dirname, 'cv.txt');
+
 const sessionStore = new Map();
 
 const SYSTEM_PROMPT = `You are an expert interview coach specialising in Senior Technical Program Manager and Senior Program Manager roles at technology companies, with deep knowledge of AdTech, data infrastructure, cloud infrastructure, and engineering-adjacent environments.
@@ -260,6 +262,99 @@ async function callClaude(session) {
     messages: session.messages
   });
 }
+
+app.get('/api/cv', (req, res) => {
+  if (fs.existsSync(CV_FILE)) {
+    res.json({ cv: fs.readFileSync(CV_FILE, 'utf8') });
+  } else {
+    res.json({ cv: null });
+  }
+});
+
+app.post('/api/cv', (req, res) => {
+  const { cv } = req.body;
+  if (!cv || !cv.trim()) return res.status(400).json({ error: 'CV cannot be empty.' });
+  try {
+    fs.writeFileSync(CV_FILE, cv.trim());
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to save CV.' });
+  }
+});
+
+app.get('/api/sessions', (req, res) => {
+  try {
+    const sessions = fs.readdirSync(SESSIONS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf8'));
+          return {
+            filename: f,
+            date: data.date,
+            candidate_name: data.candidate_name || 'Anonymous',
+            summary_preview: data.session_summary
+              ? data.session_summary.replace(/[#*_`]/g, '').substring(0, 100) + '…'
+              : null
+          };
+        } catch { return null; }
+      })
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, 8);
+    res.json({ sessions });
+  } catch {
+    res.json({ sessions: [] });
+  }
+});
+
+app.post('/api/resume', async (req, res) => {
+  const { filename } = req.body;
+  const filepath = path.join(SESSIONS_DIR, filename);
+  if (!fs.existsSync(filepath)) {
+    return res.status(404).json({ error: 'Session file not found.' });
+  }
+
+  let saved;
+  try {
+    saved = JSON.parse(fs.readFileSync(filepath, 'utf8'));
+  } catch {
+    return res.status(500).json({ error: 'Failed to read session file.' });
+  }
+
+  const sessionId = uuidv4();
+  res.cookie('sessionId', sessionId, { httpOnly: true, sameSite: 'lax' });
+  const session = getOrCreateSession(sessionId);
+
+  session.messages = saved.messages || [];
+  session.scores = saved.scores || { prompting: [], narration: [], insight: [], close: [] };
+  session.scenarios_practiced = saved.scenarios_practiced || [];
+  session.behavioural_questions = saved.behavioural_questions || [];
+  session.candidateName = saved.candidate_name || 'Anonymous';
+  session.currentMode = 'exercise';
+
+  session.messages.push({
+    role: 'user',
+    content: 'I\'m resuming this session. Give me a one-sentence recap of where we left off, then ask what I\'d like to work on next.'
+  });
+
+  try {
+    const response = await callClaude(session);
+    const text = response.content[0].text;
+    session.messages.push({ role: 'assistant', content: text });
+
+    res.json({
+      message: text,
+      scores: session.scores,
+      scenarios_practiced: session.scenarios_practiced,
+      behavioural_questions: session.behavioural_questions,
+      mode: session.currentMode
+    });
+  } catch (err) {
+    console.error('Claude API error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.post('/api/start', async (req, res) => {
   const sessionId = uuidv4();
